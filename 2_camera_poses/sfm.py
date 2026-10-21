@@ -1,7 +1,14 @@
+"""Camera poses + sparse 3D points with COLMAP (pycolmap).
+
+Usage: python sfm.py [work_folder] [matcher]
+  work_folder  holds img/ (default ../work); results go to work_folder/sfm
+  matcher      exhaustive (every pair, best for photo sets) or sequential (neighbouring
+               frames plus a few far ones, much faster for video). Default: sequential
+               for more than 150 images, otherwise exhaustive.
+"""
 import pycolmap, time, os, shutil, json, sys
 from pathlib import Path
 
-# Work folder: first command-line argument, default ./work next to this script
 root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent / 'work'
 img = root / 'img'
 out = root / 'sfm'
@@ -21,8 +28,15 @@ pycolmap.extract_features(db, img, camera_mode=pycolmap.CameraMode.SINGLE,
 log['extract_s'] = round(time.time() - t, 1)
 print('extract', log['extract_s'], flush=True)
 
+n_img = len(list(img.glob('*.jpg')) + list(img.glob('*.png')))
+matcher = sys.argv[2] if len(sys.argv) > 2 else ('sequential' if n_img > 150 else 'exhaustive')
+log['images'] = n_img; log['matcher'] = matcher
 t = time.time()
-pycolmap.match_exhaustive(db)
+if matcher == 'sequential':
+    po = pycolmap.SequentialPairingOptions(); po.overlap = 20; po.quadratic_overlap = True
+    pycolmap.match_sequential(db, pairing_options=po)
+else:
+    pycolmap.match_exhaustive(db)
 log['match_s'] = round(time.time() - t, 1)
 print('match', log['match_s'], flush=True)
 
@@ -33,6 +47,8 @@ print('map', log['map_s'], flush=True)
 
 best = max(recs.values(), key=lambda r: r.num_reg_images())
 best.write(out)
+for k, r in recs.items():
+    if r is not best: print(f'note: extra partial model {k} with {r.num_reg_images()} images ignored')
 log['summary'] = best.summary()
 log['num_models'] = len(recs)
 log['reg_images'] = best.num_reg_images()

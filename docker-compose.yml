@@ -1,0 +1,15 @@
+# Start:  docker compose up --build      then open http://localhost:8080
+# Results are written to ./runs next to this file.
+services:
+  video-to-3d:
+    build: .
+    image: video-to-3d
+    ports:
+      - "127.0.0.1:8080:8080"     # only reachable from this computer
+    volumes:
+      - ./runs:/data
+    environment:
+      # optional: put RUNPOD_API_KEY=... in a .env file here to skip typing it in the form
+      - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
+    stop_grace_period: 60s        # time to shut down a running GPU pod cleanly
+    restart: unless-stopped

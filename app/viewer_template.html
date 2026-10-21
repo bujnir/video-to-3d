@@ -1,0 +1,774 @@
+<meta charset="utf-8">
+<title>Room Scan Results</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; the pipeline runs top to bottom as real numbered steps; the 3D viewer breaks out wider as the payoff */
+:root{
+  --ground:#F2F4F6; --surface:#FFFFFF; --ink:#16212B; --muted:#5A6672; --rule:#D8DEE4;
+  --accent:#D9480F; --accent-soft:#FBE7DC; --good:#2F7D4A; --bad:#B3261E; --warn:#A86200;
+  --viewer:#0D1319; --viewer-ink:#C9D3DC;
+  --f-display:"Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body:"IBM Plex Sans", "Segoe UI", Roboto, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --ground:#11171D; --surface:#182129; --ink:#E4EAEF; --muted:#97A3AE; --rule:#2A3540;
+  --accent:#FF7A3D; --accent-soft:#3A2418; --good:#5CC27E; --bad:#FF8A80; --warn:#E3A73C; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --ground:#11171D; --surface:#182129; --ink:#E4EAEF; --muted:#97A3AE; --rule:#2A3540;
+  --accent:#FF7A3D; --accent-soft:#3A2418; --good:#5CC27E; --bad:#FF8A80; --warn:#E3A73C; color-scheme:dark}
+body{background:var(--ground);color:var(--ink);font:16px/1.6 var(--f-body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:860px;margin:0 auto;padding-block:40px 64px;display:flex;flex-direction:column;gap:48px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;letter-spacing:-.01em}
+h1{font-size:clamp(2.2rem,5vw,3.2rem);font-weight:800;line-height:1.05}
+h2{font-size:1.6rem;font-weight:700;line-height:1.2}
+h3{font-size:1.1rem;font-weight:700}
+p{margin:0;max-width:65ch}
+.eyebrow{font:500 .75rem/1 var(--f-mono);text-transform:uppercase;letter-spacing:.12em;color:var(--accent)}
+.lead{font-size:1.1rem;color:var(--muted)}
+header{display:flex;flex-direction:column;gap:14px}
+section{display:flex;flex-direction:column;gap:18px}
+.mono{font-family:var(--f-mono);font-size:.85em}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* answer table */
+.tbl{overflow-x:auto;border:1px solid var(--rule);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:.95rem}
+th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font:600 .72rem/1.2 var(--f-mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+.pill{display:inline-block;font:600 .72rem/1 var(--f-mono);padding:5px 8px;border-radius:99px;white-space:nowrap;letter-spacing:.04em}
+.pill.no{color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)}
+.pill.yes{color:var(--good);background:color-mix(in srgb,var(--good) 14%,transparent)}
+.pill.part{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
+.verdict{border-left:3px solid var(--accent);padding:4px 0 4px 16px}
+
+/* pipeline */
+.steps{display:flex;flex-direction:column;gap:0;counter-reset:s}
+.step{display:grid;grid-template-columns:48px minmax(0,1fr);gap:0 18px;padding-bottom:36px;position:relative}
+.step::before{counter-increment:s;content:counter(s);grid-row:1/span 9;width:40px;height:40px;border-radius:50%;
+  display:grid;place-items:center;font:700 1rem/1 var(--f-display);color:var(--accent);border:2px solid var(--accent);background:var(--ground);z-index:1}
+.step::after{content:"";position:absolute;left:20px;top:44px;bottom:4px;width:2px;background:var(--rule)}
+.step:last-child::after{display:none}
+.step > *{grid-column:2}
+.step h3{margin-top:8px}
+.step p{margin-top:6px}
+.tool{font:500 .78rem/1 var(--f-mono);color:var(--muted);margin-top:8px}
+.tool b{color:var(--ink);font-weight:500}
+figure{margin:14px 0 0}
+figure img{display:block;width:100%;border-radius:4px;border:1px solid var(--rule);background:var(--surface)}
+figcaption{font-size:.85rem;color:var(--muted);margin-top:8px;max-width:65ch}
+.stat{font-family:var(--f-mono);color:var(--ink);font-weight:500;font-variant-numeric:tabular-nums}
+
+/* viewer */
+.viewer-band{background:var(--viewer);color:var(--viewer-ink);border-radius:8px;overflow:hidden;display:flex;flex-direction:column}
+#view{position:relative;width:100%;aspect-ratio:16/10;max-width:100%;touch-action:none;cursor:grab}
+#view canvas{display:block;width:100%!important;height:100%!important}
+#view:active{cursor:grabbing}
+.vbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between;padding:12px 16px;border-top:1px solid #23303B}
+.chips{display:flex;flex-wrap:wrap;gap:8px 18px;font:400 .8rem/1.3 var(--f-mono);font-variant-numeric:tabular-nums}
+.chips b{display:block;color:#FFFFFF;font-weight:500;font-size:1rem}
+.vbtns{display:flex;gap:8px;flex-wrap:wrap}
+button{font:600 .82rem/1 var(--f-body);padding:9px 14px;border-radius:5px;border:1px solid #3A4A58;background:#17212A;color:#E8EEF3;cursor:pointer}
+button:hover{border-color:#FF7A3D}
+button[aria-pressed="true"]{background:#FF7A3D;border-color:#FF7A3D;color:#160A04}
+.legend{position:absolute;left:10px;top:10px;font:400 .75rem/1.4 var(--f-mono);color:#C9D3DC;pointer-events:none;background:rgba(13,19,25,.72);padding:4px 8px;border-radius:4px;max-width:calc(100% - 20px)}
+.legend span{display:inline-block;width:10px;height:10px;border:2px solid #FF7A3D;margin-right:6px;vertical-align:-1px}
+#status[hidden]{display:none}
+#splatwrap{position:relative;width:100%;aspect-ratio:16/10;max-width:100%;background:#0D1319}
+#splat{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+#splat:active{cursor:grabbing}
+#sp-status{position:absolute;inset:0;display:grid;place-items:center;font:500 .9rem var(--f-mono);color:#9FB0BE;pointer-events:none}
+#sp-status[hidden]{display:none}
+@media (max-width:560px){#splatwrap{aspect-ratio:4/5}}
+#topowrap{position:relative;width:100%;aspect-ratio:16/10;max-width:100%;background:#0D1319}
+#topowrap canvas{display:block;width:100%!important;height:100%!important;touch-action:none;cursor:grab}
+#topowrap canvas:active{cursor:grabbing}
+#topo-status{position:absolute;inset:0;display:grid;place-items:center;font:500 .9rem var(--f-mono);color:#9FB0BE;pointer-events:none}
+#topo-status[hidden]{display:none}
+.ramp{display:inline-block;width:72px;height:9px;margin:0 6px;vertical-align:0;border-radius:2px;background:linear-gradient(90deg,#22577A,#38A3A5,#80ED99,#F2CC8F,#E07A5F)}
+.cut{display:flex;align-items:center;gap:10px;font:400 .8rem var(--f-mono);color:#C9D3DC;width:100%}
+.cut input{flex:1;accent-color:#FF7A3D;min-width:120px}
+@media (max-width:560px){#topowrap{aspect-ratio:4/5}}
+#blkwrap{position:relative;width:100%;aspect-ratio:16/10;max-width:100%;background:#0D1319}
+#blkwrap canvas{position:absolute;inset:0;display:block;width:100%;height:100%}
+#blk-splat{touch-action:none;cursor:grab}
+#blk-splat:active{cursor:grabbing}
+#blk-shapes{pointer-events:none}
+#blk-status{position:absolute;inset:0;display:grid;place-items:center;font:500 .9rem var(--f-mono);color:#9FB0BE;pointer-events:none}
+#blk-status[hidden]{display:none}
+.seg{display:inline-flex;border:1px solid #3A4A58;border-radius:5px;overflow:hidden}
+.seg button{border:0;border-radius:0}
+.seg button+button{border-left:1px solid #3A4A58}
+@media (max-width:560px){#blkwrap{aspect-ratio:4/5}}
+#status{position:absolute;inset:0;display:grid;place-items:center;font:500 .9rem var(--f-mono);color:#9FB0BE}
+
+.note{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+.foot{font-size:.85rem;color:var(--muted);display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--rule);padding-top:18px}
+ul{margin:0;padding-left:1.2em;max-width:65ch}
+li+li{margin-top:4px}
+@media (max-width:560px){.step{grid-template-columns:36px minmax(0,1fr);gap:0 12px}.step::before{width:32px;height:32px;font-size:.9rem}.step::after{left:16px;top:36px}#view{aspect-ratio:4/5}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+<div class="wrap">
+<header>
+  <div class="eyebrow">Video to 3D · results</div>
+  <h1 id="title">Room scan</h1>
+  <p class="lead" id="summary">Loading the run summary…</p>
+</header>
+
+<section aria-labelledby="sp-h" style="gap:14px">
+  <h2 id="sp-h">Photo-real model</h2>
+  <div class="viewer-band">
+    <div id="splatwrap">
+      <canvas id="splat" aria-label="Interactive photo-real 3D model of the room"></canvas>
+      <div class="legend" style="pointer-events:none">drag to orbit · scroll or pinch to zoom · starts at photo 1</div>
+      <div id="sp-status">Loading the 3D model…</div>
+    </div>
+    <div class="vbar">
+      <div class="chips">
+        <div><b data-s="splats_shown">–</b>splats shown</div>
+        <div><b data-s="psnr">–</b>match to unseen photos, dB</div>
+        <div><b data-s="cost">–</b>GPU cost</div>
+      </div>
+      <div class="vbtns">
+        <button id="sp-fly" type="button" aria-pressed="false">Fly the camera path</button>
+        <button id="sp-prev" type="button">Previous photo</button>
+        <button id="sp-next" type="button">Next photo</button>
+      </div>
+    </div>
+  </div>
+  <p class="lead" style="font-size:1rem">A Gaussian splat: <span data-s="splats_shown">–</span> small coloured 3D blobs trained to match the video frames. "Previous" and "Next" jump to the exact spot each frame was taken from; drag to look around from anywhere else.</p>
+  <figure style="margin:0">
+    <img id="sp-compare" src="compare.jpg" alt="A real photo of the room next to the splat's render from the same position" loading="lazy">
+    <figcaption>Left: a video frame the model never saw during training. Right: the model rendered from the same position. Average match on all held-out frames: <span data-s="psnr">–</span> dB PSNR (higher is better; above 25 is good, above 30 is excellent).</figcaption>
+  </figure>
+</section>
+<section aria-labelledby="topo-h" style="gap:14px">
+  <h2 id="topo-h2">Smooth surface</h2>
+  <div class="steps" style="display:none">
+    <div class="step">
+      <h3 id="topo-h">Smooth it into a surface</h3>
+      <p>For measuring and route planning the photo look gets in the way, so we turned the splat into one smooth, solid surface. Depth maps rendered from all 104 camera positions are fused into a single volume, the surface is pulled out of it and then smoothed. What is left is pure shape, coloured by height like a topographic map, with a contour line at every height step.</p>
+      <p class="tool">Method: <b>depth fusion (TSDF) + marching cubes + Taubin smoothing</b>, on CPU · <span class="stat" data-m="triangles">–</span> triangles · <span class="stat" data-m="minutes">–</span> min</p>
+    </div>
+  </div>
+  <div class="viewer-band">
+    <div id="topowrap" role="img" aria-label="Interactive smooth surface model of the room, coloured by height">
+      <div class="legend">floor<i class="ramp"></i>top · drag to orbit · scroll or pinch to zoom</div>
+      <div id="topo-status">Loading the surface…</div>
+    </div>
+    <div class="vbar">
+      <div class="chips">
+        <div><b data-m="triangles">–</b>triangles</div>
+        <div><b data-m="levels">–</b>height bands</div>
+        <div><b>none</b>photo texture</div>
+      </div>
+      <div class="vbtns">
+        <button id="topo-mode" type="button" aria-pressed="true">Height colours</button>
+        <button id="topo-top" type="button">Top-down map</button>
+        <button id="topo-reset" type="button">Reset view</button>
+      </div>
+      <label class="cut">Cut at height <input id="topo-cut" type="range" min="12" max="100" value="100" aria-label="Hide everything above this height"></label>
+    </div>
+  </div>
+  <p class="lead" style="font-size:1rem">One smooth, solid surface with no photo texture, coloured by height like a topographic map. Slide "Cut at height" down to slice the room like a floor plan; "Top-down map" looks straight down. Heights are relative until the model gets a real-world scale.</p>
+</section>
+<section aria-labelledby="blk-h" style="gap:14px">
+  <h2 id="blk-h2">Shapes (SketchUp style)</h2>
+  <div class="steps" style="display:none">
+    <div class="step">
+      <h3 id="blk-h">Simplify it into shapes</h3>
+      <p>For layouts, clearances and flight planning you want what an architect draws in SketchUp: a flat floor, straight walls and a simple box for each piece of furniture. We get that automatically from the surface: the floor is fitted as a plane, the walls as a rectangle around it, and every object becomes one or more boxes, split into a low and a high part where needed (a sofa's seat and back). An object with floor visible underneath becomes a table: a top on four legs.</p>
+      <p class="tool">Method: <b>plane fit + top-down height map + box fitting</b>, on CPU in seconds · <span class="stat" data-b="boxes">–</span> boxes · <span class="stat" data-b="objects">–</span> objects</p>
+    </div>
+  </div>
+  <div class="viewer-band">
+    <div id="blkwrap">
+      <canvas id="blk-splat" aria-label="Photo-real model of the room with the simplified shapes drawn on top"></canvas>
+      <canvas id="blk-shapes" aria-hidden="true"></canvas>
+      <div class="legend">drag to orbit · scroll or pinch to zoom · starts at photo 1</div>
+      <div id="blk-status">Scroll here to load the model…</div>
+    </div>
+    <div class="vbar">
+      <div class="seg" role="group" aria-label="What to show">
+        <button type="button" data-blk="0" aria-pressed="false">Photo</button>
+        <button type="button" data-blk="0.3" aria-pressed="true">Both</button>
+        <button type="button" data-blk="1" aria-pressed="false">Shapes</button>
+      </div>
+      <div class="vbtns">
+        <button id="blk-prev" type="button">Previous photo</button>
+        <button id="blk-next" type="button">Next photo</button>
+      </div>
+      <label class="cut">Photo <input id="blk-mix" type="range" min="0" max="100" value="30" aria-label="Blend from the photo-real model to the shapes"> Shapes</label>
+    </div>
+  </div>
+  <p class="lead" style="font-size:1rem">Floor, walls and a box for each piece of furniture, fitted automatically. "Both" draws the shapes over the photo-real model to check the fit; "Shapes" shows the clean model. The near wall hides itself when you orbit outside the room.</p>
+</section>
+<section aria-labelledby="dl-h" style="gap:14px">
+  <h2 id="dl-h">Files</h2>
+  <p class="lead" style="font-size:1rem">Everything from this run, in the usual formats. The same files are in the output folder and in the .zip.</p>
+  <div id="files" class="note"></div>
+</section>
+<footer class="foot">
+  <div><strong>Pipeline:</strong> frames (ffmpeg) → camera poses (COLMAP) → Gaussian splat (gsplat on a RunPod GPU) → smooth surface (TSDF fusion) → shapes (plane and box fitting). All models are in relative units until a real-world scale is added.</div>
+</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+/* Minimal WebGL2 Gaussian splat viewer for the .splat format (32 bytes per splat).
+   Camera convention follows COLMAP/OpenCV: x right, y down, z forward.
+   SplatViewer(canvas, {splatUrl, view, onStatus}) */
+(function () {
+  const VS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp sampler2D uA; uniform highp sampler2D uB; uniform highp sampler2D uC; uniform mediump sampler2D uCol;
+uniform mat4 view; uniform mat4 proj; uniform vec2 focal; uniform vec2 viewport;
+in vec2 position; in uint index;
+out vec4 vColor; out vec2 vPos;
+void main () {
+  ivec2 uv = ivec2(int(index & 2047u), int(index >> 11));
+  vec3 c = texelFetch(uA, uv, 0).xyz;
+  vec4 cam = view * vec4(c, 1.0);
+  vec4 p2 = proj * cam;
+  float clip = 1.2 * p2.w;
+  if (cam.z < 0.05 || p2.x < -clip || p2.x > clip || p2.y < -clip || p2.y > clip) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+  vec4 b = texelFetch(uB, uv, 0); vec4 d = texelFetch(uC, uv, 0);
+  mat3 Vrk = mat3(b.x, b.y, b.z, b.y, b.w, d.x, b.z, d.x, d.y);
+  mat3 J = mat3(focal.x / cam.z, 0.0, -(focal.x * cam.x) / (cam.z * cam.z),
+                0.0, -focal.y / cam.z, (focal.y * cam.y) / (cam.z * cam.z),
+                0.0, 0.0, 0.0);
+  mat3 T = transpose(mat3(view)) * J;
+  mat3 cov2d = transpose(T) * Vrk * T;
+  cov2d[0][0] += 0.3; cov2d[1][1] += 0.3;
+  float mid = (cov2d[0][0] + cov2d[1][1]) / 2.0;
+  float radius = length(vec2((cov2d[0][0] - cov2d[1][1]) / 2.0, cov2d[0][1]));
+  float l1 = mid + radius, l2 = mid - radius;
+  if (l2 < 0.0) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+  vec2 diag = normalize(vec2(cov2d[0][1], l1 - cov2d[0][0]));
+  vec2 major = min(sqrt(2.0 * l1), 1024.0) * diag;
+  vec2 minor = min(sqrt(2.0 * l2), 1024.0) * vec2(diag.y, -diag.x);
+  vColor = texelFetch(uCol, uv, 0);
+  vPos = position;
+  vec2 ctr = p2.xy / p2.w;
+  gl_Position = vec4(ctr + position.x * major / viewport + position.y * minor / viewport, 0.0, 1.0);
+}`;
+  const FS = `#version 300 es
+precision highp float;
+in vec4 vColor; in vec2 vPos; out vec4 fragColor;
+void main () {
+  float A = -dot(vPos, vPos);
+  if (A < -4.0) discard;
+  float B = exp(A) * vColor.a;
+  fragColor = vec4(B * vColor.rgb, B);
+}`;
+
+  // depth sort in a worker: 16-bit counting sort, nearest first (front-to-back compositing)
+  const WORKER = `
+let pos = null, n = 0;
+onmessage = (e) => {
+  if (e.data.pos) { pos = e.data.pos; n = pos.length / 3; return; }
+  const m = e.data.view; if (!pos) return;
+  const depth = new Int32Array(n); let mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const z = m[2] * pos[3*i] + m[6] * pos[3*i+1] + m[10] * pos[3*i+2] + m[14];
+    const d = (z * 4096) | 0; depth[i] = d; if (d < mn) mn = d; if (d > mx) mx = d;
+  }
+  const inv = (256 * 256 - 1) / Math.max(1, mx - mn);
+  const counts = new Uint32Array(256 * 256);
+  for (let i = 0; i < n; i++) { depth[i] = ((depth[i] - mn) * inv) | 0; counts[depth[i]]++; }
+  const starts = new Uint32Array(256 * 256);
+  for (let i = 1; i < 65536; i++) starts[i] = starts[i - 1] + counts[i - 1];
+  const idx = new Uint32Array(n);
+  for (let i = 0; i < n; i++) idx[starts[depth[i]]++] = i;
+  postMessage({ idx }, [idx.buffer]);
+};`;
+
+  function compile(gl, type, src) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  function tex(gl, unit, ifmt, fmt, type, w, h, data) {
+    const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, w, h, 0, fmt, type, data);
+    return t;
+  }
+
+  // small vector helpers
+  const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+  const add = (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
+  const mul = (a, s) => [a[0]*s, a[1]*s, a[2]*s];
+  const dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+  const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+
+  // world->camera (OpenCV) as column-major 4x4 from camera rows x,y,z and position p
+  function viewFrom(x, y, z, p) {
+    return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, p), -dot(y, p), -dot(z, p), 1];
+  }
+  function lookAt(pos, target, up) {
+    const z = norm(sub(target, pos));
+    const x = norm(cross(mul(up, -1), z));
+    const y = cross(z, x);
+    return viewFrom(x, y, z, pos);
+  }
+  function viewFromColmap(R, t) { // R row-major 3x3 world->cam
+    return [R[0], R[3], R[6], 0, R[1], R[4], R[7], 0, R[2], R[5], R[8], 0, t[0], t[1], t[2], 1];
+  }
+
+  window.SplatViewer = function (canvas, opts) {
+    const status = opts.onStatus || (() => {});
+    const gl = canvas.getContext('webgl2', { antialias: false, premultipliedAlpha: true });
+    if (!gl) { status('This browser cannot show the 3D splat (WebGL2 is off).'); return null; }
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS)); gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFuncSeparate(gl.ONE_MINUS_DST_ALPHA, gl.ONE, gl.ONE_MINUS_DST_ALPHA, gl.ONE);
+    gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
+    const U = (n) => gl.getUniformLocation(prog, n);
+    const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+    const quad = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-2, -2, 2, -2, 2, 2, -2, 2]), gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(prog, 'position'); gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    const idxBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, idxBuf);
+    const aIdx = gl.getAttribLocation(prog, 'index'); gl.enableVertexAttribArray(aIdx);
+    gl.vertexAttribIPointer(aIdx, 1, gl.UNSIGNED_INT, false, 0, 0); gl.vertexAttribDivisor(aIdx, 1);
+
+    const V = opts.view; const fxRef = V.fx / V.w;
+    const up = V.up, center = V.center;
+    let n = 0, ready = false, sortedCount = 0;
+    let state = { yaw: 0, pitch: 0.35, dist: Math.max(2.5, V.radius * 0.9), target: V.cam_center };
+    let view = null, dirty = true, mode = 'photo', flyT = 0, photoView = null;
+    // build an orbit frame from the up vector
+    const ref = Math.abs(up[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const e1 = norm(cross(up, ref)), e2 = cross(up, e1);
+    function orbitView() {
+      const cp = Math.cos(state.pitch), dir = add(add(mul(e1, Math.cos(state.yaw) * cp), mul(e2, Math.sin(state.yaw) * cp)), mul(up, Math.sin(state.pitch)));
+      const pos = add(state.target, mul(dir, state.dist));
+      return lookAt(pos, state.target, up);
+    }
+    function camView(t) {
+      const cams = V.cams, i = Math.floor(t) % cams.length, j = (i + 1) % cams.length, f = t - Math.floor(t);
+      const a = cams[i], b = cams[j];
+      const Ra = a.R, Rb = b.R;
+      const Ca = mul([Ra[0]*a.t[0]+Ra[3]*a.t[1]+Ra[6]*a.t[2], Ra[1]*a.t[0]+Ra[4]*a.t[1]+Ra[7]*a.t[2], Ra[2]*a.t[0]+Ra[5]*a.t[1]+Ra[8]*a.t[2]], -1);
+      const Cb = mul([Rb[0]*b.t[0]+Rb[3]*b.t[1]+Rb[6]*b.t[2], Rb[1]*b.t[0]+Rb[4]*b.t[1]+Rb[7]*b.t[2], Rb[2]*b.t[0]+Rb[5]*b.t[1]+Rb[8]*b.t[2]], -1);
+      const za = [Ra[6], Ra[7], Ra[8]], zb = [Rb[6], Rb[7], Rb[8]];
+      const ya = [Ra[3], Ra[4], Ra[5]], yb = [Rb[3], Rb[4], Rb[5]];
+      const p = add(mul(Ca, 1 - f), mul(Cb, f));
+      const z = norm(add(mul(za, 1 - f), mul(zb, f)));
+      const yRaw = add(mul(ya, 1 - f), mul(yb, f));
+      const x = norm(cross(yRaw, z)), y = cross(z, x);
+      return viewFrom(x, y, z, p);
+    }
+
+    const worker = new Worker(URL.createObjectURL(new Blob([WORKER], { type: 'text/javascript' })));
+    let sorting = false, pendingView = null;
+    worker.onmessage = (e) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, idxBuf); gl.bufferData(gl.ARRAY_BUFFER, e.data.idx, gl.DYNAMIC_DRAW);
+      sortedCount = e.data.idx.length; sorting = false; dirty = true;
+      if (pendingView) { const v = pendingView; pendingView = null; requestSort(v); }
+    };
+    function requestSort(v) { if (sorting) { pendingView = v; return; } sorting = true; worker.postMessage({ view: Float32Array.from(v) }); }
+
+    function resize() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      const w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; dirty = true; }
+    }
+
+    function draw() {
+      resize();
+      const W = canvas.width, H = canvas.height;
+      const f = fxRef * W;                      // same horizontal field of view as the training photos
+      const znear = 0.05, zfar = 200;
+      const proj = [2 * f / W, 0, 0, 0, 0, -2 * f / H, 0, 0, 0, 0, zfar / (zfar - znear), 1, 0, 0, -(zfar * znear) / (zfar - znear), 0];
+      gl.viewport(0, 0, W, H);
+      gl.uniformMatrix4fv(U('proj'), false, proj);
+      gl.uniformMatrix4fv(U('view'), false, view);
+      gl.uniform2fv(U('focal'), [f, f]);
+      gl.uniform2fv(U('viewport'), [W, H]);
+      gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+      if (sortedCount) gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, sortedCount);
+      if (opts.onDraw) opts.onDraw(view, f, W, H);
+    }
+
+    let lastSortView = null;
+    function camPos(v) { // camera centre from a world->camera matrix
+      return [-(v[0]*v[12] + v[1]*v[13] + v[2]*v[14]), -(v[4]*v[12] + v[5]*v[13] + v[6]*v[14]), -(v[8]*v[12] + v[9]*v[13] + v[10]*v[14])];
+    }
+    function toOrbit() { // keep the current camera position, switch to orbiting the room centre
+      if (mode === 'orbit' || !view) { mode = 'orbit'; return; }
+      const d = sub(camPos(view), state.target), dist = Math.hypot(d[0], d[1], d[2]) || 1, n = mul(d, 1 / dist);
+      state.dist = dist; state.pitch = Math.asin(Math.max(-1, Math.min(1, dot(n, up)))); state.yaw = Math.atan2(dot(n, e2), dot(n, e1));
+      mode = 'orbit'; dirty = true;
+    }
+    function frame() {
+      if (ready) {
+        if (mode === 'fly') { flyT += 0.012; view = camView(flyT); dirty = true; }
+        else if (mode === 'photo') { if (!photoView) photoView = camView(0); view = photoView; }
+        else if (dirty || !view) view = orbitView();
+        if (!lastSortView || view.some((v, i) => Math.abs(v - lastSortView[i]) > 0.01)) { lastSortView = view.slice(); requestSort(view); }
+        if (dirty) { draw(); dirty = mode === 'fly'; }
+      }
+      requestAnimationFrame(frame);
+    }
+
+    // input: drag to orbit, wheel / pinch to zoom
+    let drag = null; const pts = new Map();
+    canvas.addEventListener('pointerdown', (e) => { if (mode === 'fly') return; toOrbit(); canvas.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]); drag = [e.clientX, e.clientY]; });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!pts.has(e.pointerId) || mode !== 'orbit') return;
+      const prev = pts.get(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]);
+      if (pts.size === 2) {
+        const [p1, p2] = [...pts.values()];
+        const d = Math.hypot(p1[0] - p2[0], p1[1] - p2[1]);
+        if (drag && drag.pinch) state.dist = Math.min(30, Math.max(0.5, state.dist * drag.pinch / d));
+        drag = { pinch: d };
+      } else {
+        state.yaw -= (e.clientX - prev[0]) * 0.006;
+        state.pitch = Math.min(1.45, Math.max(-1.2, state.pitch + (e.clientY - prev[1]) * 0.006));
+      }
+      dirty = true;
+    });
+    const end = (e) => { pts.delete(e.pointerId); drag = null; };
+    canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
+    canvas.addEventListener('wheel', (e) => { e.preventDefault(); if (mode === 'fly') return; toOrbit(); state.dist = Math.min(30, Math.max(0.5, state.dist * Math.exp(e.deltaY * 0.001))); dirty = true; }, { passive: false });
+
+    // parts may be shipped as base64 text, since artifact hosting serves text but not raw binary
+    const b64ToBuf = (t) => { const bin = atob(t.trim()); const u = new Uint8Array(bin.length); for (let j = 0; j < bin.length; j++) u[j] = bin.charCodeAt(j); return u.buffer; };
+    status('Loading the 3D model…');
+    const urls = opts.parts || [opts.splatUrl];
+    let loaded = 0;
+    Promise.all(urls.map((u) => fetch(u).then((r) => { if (!r.ok) throw new Error(r.status); return u.endsWith('.txt') ? r.text().then(b64ToBuf) : r.arrayBuffer(); })
+      .then((b) => { loaded++; if (loaded < urls.length) status(`Loading the 3D model… ${loaded} of ${urls.length}`); return b; })))
+    .then((bufs) => {
+      // decode every part into one list of splats
+      const parts = bufs.map((buf) => {
+        if (!opts.parts) return { kind: 'splat', buf, n: Math.floor(buf.byteLength / 32) };
+        const dv = new DataView(buf), m = dv.getUint32(0, true);
+        const lo = [dv.getFloat32(8, true), dv.getFloat32(12, true), dv.getFloat32(16, true)];
+        const hi = [dv.getFloat32(20, true), dv.getFloat32(24, true), dv.getFloat32(28, true)];
+        const smin = dv.getFloat32(32, true), smax = dv.getFloat32(36, true);
+        let o = 48;
+        const P = new Uint16Array(buf, o, m * 3); o += m * 6;
+        const S = new Uint8Array(buf, o, m * 3); o += m * 3;
+        const R = new Uint8Array(buf, o, m * 4); o += m * 4;
+        const Cc = new Uint8Array(buf, o, m * 4);
+        return { kind: 'q', n: m, lo, hi, smin, smax, P, S, R, Cc };
+      });
+      n = parts.reduce((a, p) => a + p.n, 0);
+      const TW = 2048, TH = Math.ceil(n / TW);
+      const A = new Float32Array(TW * TH * 4), B = new Float32Array(TW * TH * 4), C = new Float32Array(TW * TH * 4), col = new Uint8Array(TW * TH * 4);
+      const pos = new Float32Array(n * 3);
+      let i = 0;
+      const put = (px, py, pz, sx, sy, sz, w, x, y, z, r, g, b, a) => {
+        pos[3*i] = px; pos[3*i+1] = py; pos[3*i+2] = pz;
+        A[4*i] = px; A[4*i+1] = py; A[4*i+2] = pz;
+        const ql = Math.hypot(w, x, y, z) || 1; w /= ql; x /= ql; y /= ql; z /= ql;
+        const R0 = 1 - 2*(y*y + z*z), R1 = 2*(x*y - w*z), R2 = 2*(x*z + w*y),
+              R3 = 2*(x*y + w*z), R4 = 1 - 2*(x*x + z*z), R5 = 2*(y*z - w*x),
+              R6 = 2*(x*z - w*y), R7 = 2*(y*z + w*x), R8 = 1 - 2*(x*x + y*y);
+        const M0 = R0*sx, M1 = R1*sy, M2 = R2*sz, M3 = R3*sx, M4 = R4*sy, M5 = R5*sz, M6 = R6*sx, M7 = R7*sy, M8 = R8*sz;
+        B[4*i] = M0*M0 + M1*M1 + M2*M2; B[4*i+1] = M0*M3 + M1*M4 + M2*M5; B[4*i+2] = M0*M6 + M1*M7 + M2*M8;
+        B[4*i+3] = M3*M3 + M4*M4 + M5*M5; C[4*i] = M3*M6 + M4*M7 + M5*M8; C[4*i+1] = M6*M6 + M7*M7 + M8*M8;
+        col[4*i] = r; col[4*i+1] = g; col[4*i+2] = b; col[4*i+3] = a;
+        i++;
+      };
+      for (const p of parts) {
+        if (p.kind === 'splat') {
+          const f32 = new Float32Array(p.buf), u8 = new Uint8Array(p.buf);
+          for (let k = 0; k < p.n; k++) put(f32[8*k], f32[8*k+1], f32[8*k+2], f32[8*k+3], f32[8*k+4], f32[8*k+5],
+            (u8[32*k+28]-128)/128, (u8[32*k+29]-128)/128, (u8[32*k+30]-128)/128, (u8[32*k+31]-128)/128,
+            u8[32*k+24], u8[32*k+25], u8[32*k+26], u8[32*k+27]);
+        } else {
+          const ex = [(p.hi[0]-p.lo[0])/65535, (p.hi[1]-p.lo[1])/65535, (p.hi[2]-p.lo[2])/65535], ss = (p.smax - p.smin) / 255;
+          for (let k = 0; k < p.n; k++) put(p.lo[0] + p.P[3*k]*ex[0], p.lo[1] + p.P[3*k+1]*ex[1], p.lo[2] + p.P[3*k+2]*ex[2],
+            Math.exp(p.smin + p.S[3*k]*ss), Math.exp(p.smin + p.S[3*k+1]*ss), Math.exp(p.smin + p.S[3*k+2]*ss),
+            (p.R[4*k]-128)/128, (p.R[4*k+1]-128)/128, (p.R[4*k+2]-128)/128, (p.R[4*k+3]-128)/128,
+            p.Cc[4*k], p.Cc[4*k+1], p.Cc[4*k+2], p.Cc[4*k+3]);
+        }
+      }
+      tex(gl, 0, gl.RGBA32F, gl.RGBA, gl.FLOAT, TW, TH, A); gl.uniform1i(U('uA'), 0);
+      tex(gl, 1, gl.RGBA32F, gl.RGBA, gl.FLOAT, TW, TH, B); gl.uniform1i(U('uB'), 1);
+      tex(gl, 2, gl.RGBA32F, gl.RGBA, gl.FLOAT, TW, TH, C); gl.uniform1i(U('uC'), 2);
+      tex(gl, 3, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, TW, TH, col); gl.uniform1i(U('uCol'), 3);
+      worker.postMessage({ pos }, [pos.buffer]);
+      ready = true; dirty = true; status('');
+    }).catch(() => status('Could not load the 3D model.'));
+    new ResizeObserver(() => { dirty = true; }).observe(canvas);
+    requestAnimationFrame(frame);
+
+    return {
+      count: () => n,
+      fly(on) { mode = on ? 'fly' : 'photo'; if (!on) photoView = view; dirty = true; },
+      reset() { mode = 'photo'; photoView = camView(0); dirty = true; },
+      photo(k) { mode = 'photo'; photoView = camView(k); dirty = true; },
+      cameras: () => V.cams.length,
+    };
+  };
+})();
+
+</script>
+<script>
+(function(){
+  const st = document.getElementById('sp-status');
+  const setStatus = t => { st.textContent = t; st.hidden = !t; };
+  const fmt = n => typeof n === 'number' ? n.toLocaleString('en-US') : n;
+  fetch('splat_stats.json').then(r => r.json()).then(s => {
+    document.querySelectorAll('[data-s]').forEach(el => { const v = s[el.dataset.s]; if (v !== undefined) el.textContent = fmt(v); });
+  }).catch(() => {});
+  if (!window.SplatViewer) { setStatus('3D viewer could not start.'); return; }
+  fetch('splat_view.json').then(r => r.json()).then(v => {
+    const sv = SplatViewer(document.getElementById('splat'), { parts: ['room_part0.b64.txt', 'room_part1.b64.txt'], view: v, onStatus: setStatus });
+    if (!sv) return;
+    let k = 0;
+    const fly = document.getElementById('sp-fly');
+    fly.addEventListener('click', () => { const on = fly.getAttribute('aria-pressed') !== 'true'; fly.setAttribute('aria-pressed', on); fly.textContent = on ? 'Stop' : 'Fly the camera path'; sv.fly(on); });
+    const stopFly = () => { if (fly.getAttribute('aria-pressed') === 'true') fly.click(); };
+    document.getElementById('sp-prev').addEventListener('click', () => { stopFly(); k = (k - 1 + sv.cameras()) % sv.cameras(); sv.photo(k); });
+    document.getElementById('sp-next').addEventListener('click', () => { stopFly(); k = (k + 1) % sv.cameras(); sv.photo(k); });
+  }).catch(() => setStatus('Could not load the camera data.'));
+})();
+</script>
+<script>
+/* Smooth surface ("topography") viewer: height colours, contour lines, height cut */
+(function(){
+  const host = document.getElementById('topowrap'), st = document.getElementById('topo-status');
+  if (!window.THREE){ st.textContent = '3D viewer could not load.'; return; }
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+  renderer.setClearColor(0x0D1319, 1);
+  host.insertBefore(renderer.domElement, host.firstChild);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 100);
+  let controls = null; // created once the room's up direction is known (OrbitControls reads camera.up at creation)
+  function size(){ const w = host.clientWidth, h = host.clientHeight; renderer.setSize(w, h, false); camera.aspect = w/h; camera.updateProjectionMatrix(); }
+  new ResizeObserver(size).observe(host); size();
+  const LEVELS = 16;
+  const uni = { uUp:{value:new THREE.Vector3(0,0,1)}, uH0:{value:0}, uH1:{value:1}, uCut:{value:2}, uMode:{value:1}, uLevels:{value:LEVELS} };
+  const mat = new THREE.ShaderMaterial({
+    uniforms: uni, side: THREE.DoubleSide, extensions: {derivatives: true},
+    vertexShader: `
+      uniform vec3 uUp; uniform float uH0, uH1;
+      varying float vH; varying vec3 vN;
+      void main(){
+        vH = (dot(position, uUp) - uH0) / (uH1 - uH0);
+        vN = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      uniform float uCut, uMode, uLevels;
+      varying float vH; varying vec3 vN;
+      vec3 ramp(float t){
+        vec3 c0=vec3(.133,.341,.478), c1=vec3(.220,.639,.647), c2=vec3(.502,.929,.600), c3=vec3(.949,.800,.561), c4=vec3(.878,.478,.373);
+        t = clamp(t,0.,1.)*4.;
+        if (t<1.) return mix(c0,c1,t); if (t<2.) return mix(c1,c2,t-1.); if (t<3.) return mix(c2,c3,t-2.); return mix(c3,c4,t-3.);
+      }
+      void main(){
+        if (vH > uCut) discard;
+        vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n;
+        float light = .28 + .72 * max(dot(n, normalize(vec3(.35,.55,.75))), 0.) + .12 * max(n.z, 0.);
+        vec3 base = uMode > .5 ? ramp(vH) : vec3(.80,.78,.74);
+        vec3 col = base * light;
+        if (uMode > .5){
+          float c = vH * uLevels; float fw = fwidth(c);
+          float line = 1. - smoothstep(0., fw * 1.3, abs(fract(c - .5) - .5));
+          col = mix(col, vec3(.05,.07,.09), line * .75);
+        }
+        // the cut face: darken surfaces right at the cut height so the slice reads clearly
+        if (uCut < 1.5) col = mix(col, vec3(1.,.48,.24), (1. - smoothstep(0., .012, uCut - vH)) * .85);
+        gl_FragColor = vec4(col, 1.);
+      }`
+  });
+  const b64 = t => { const s = atob(t.trim()); const u = new Uint8Array(s.length); for (let i=0;i<s.length;i++) u[i] = s.charCodeAt(i); return u.buffer; };
+  let home = null, topView = null, center = null, up = null;
+  Promise.all([
+    fetch('splat_view.json').then(r=>r.json()),
+    fetch('room_mesh.b64.txt').then(r=>{ if(!r.ok) throw new Error(r.status); return r.text(); }),
+    fetch('mesh_stats.json').then(r=>r.json()).catch(()=>({}))
+  ]).then(([view, txt, ms])=>{
+    const buf = b64(txt), dv = new DataView(buf);
+    const nv = dv.getUint32(0, true), nf = dv.getUint32(4, true);
+    const lo = [0,1,2].map(i=>dv.getFloat32(8+4*i, true)), hi = [0,1,2].map(i=>dv.getFloat32(20+4*i, true));
+    const q = new Uint16Array(buf.slice(32, 32 + nv*6));
+    const pos = new Float32Array(nv*3);
+    for (let i=0;i<nv*3;i++){ const k = i%3; pos[i] = lo[k] + (hi[k]-lo[k]) * q[i] / 65535; }
+    const idx = new Uint32Array(buf.slice(32 + nv*6, 32 + nv*6 + nf*12));
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    g.computeVertexNormals();
+    up = new THREE.Vector3(...view.up).normalize();
+    camera.up.copy(up);
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; controls.dampingFactor = 0.08;
+    // height range from the 1st to 99.5th percentile of vertex heights (ignores stray bits)
+    const hs = []; for (let i=0;i<nv;i+=7) hs.push(pos[3*i]*up.x + pos[3*i+1]*up.y + pos[3*i+2]*up.z);
+    hs.sort((a,b)=>a-b);
+    uni.uUp.value.copy(up); uni.uH0.value = hs[Math.floor(hs.length*.01)]; uni.uH1.value = hs[Math.floor(hs.length*.995)];
+    scene.add(new THREE.Mesh(g, mat));
+    // view setup: centre on the room core, look in along the first photo's direction
+    const xs=[],ys=[],zs=[]; for (let i=0;i<nv;i+=7){ xs.push(pos[3*i]); ys.push(pos[3*i+1]); zs.push(pos[3*i+2]); }
+    const med = a => a.sort((p,q)=>p-q)[a.length>>1];
+    center = new THREE.Vector3(med(xs), med(ys), med(zs));
+    const c0 = view.cams[0], R = c0.R;
+    const fwd = new THREE.Vector3(R[6], R[7], R[8]); // camera z axis (looking direction) in world space
+    const fh = fwd.clone().sub(up.clone().multiplyScalar(fwd.dot(up))).normalize();
+    const span = uni.uH1.value - uni.uH0.value;
+    // top-down map: look straight down, with the room's long side running across the screen
+    const ax = new THREE.Vector3().crossVectors(up, Math.abs(up.x) < .9 ? new THREE.Vector3(1,0,0) : new THREE.Vector3(0,1,0)).normalize();
+    const ay = new THREE.Vector3().crossVectors(up, ax).normalize();
+    let sxx=0, syy=0, sxy=0, cnt=0;
+    for (let i=0;i<nv;i+=11){ const d = new THREE.Vector3(pos[3*i]-center.x, pos[3*i+1]-center.y, pos[3*i+2]-center.z); const a = d.dot(ax), b = d.dot(ay); sxx+=a*a; syy+=b*b; sxy+=a*b; cnt++; }
+    const ang = 0.5*Math.atan2(2*sxy, sxx-syy);
+    const longAxis = ax.clone().multiplyScalar(Math.cos(ang)).add(ay.clone().multiplyScalar(Math.sin(ang)));
+    const shortAxis = new THREE.Vector3().crossVectors(up, longAxis).normalize();
+    const extent = Math.sqrt(Math.max(sxx, syy)/cnt);
+    topView = { pos: center.clone().add(up.clone().multiplyScalar(extent*3.4)).sub(shortAxis.clone().multiplyScalar(extent*0.02)), target: center.clone() };
+    const side = shortAxis.dot(fh) > 0 ? -1 : 1;
+    home = { pos: center.clone().add(shortAxis.clone().multiplyScalar(side*extent*2.3)).add(up.clone().multiplyScalar(extent*1.9)), target: center.clone() };
+    camera.position.copy(home.pos); controls.target.copy(home.target);
+    const fmt = n => typeof n === 'number' ? n.toLocaleString('en-US') : n;
+    ms.levels = LEVELS;
+    document.querySelectorAll('[data-m]').forEach(el=>{ const v = ms[el.dataset.m]; if (v!==undefined) el.textContent = fmt(v); });
+    st.hidden = true;
+  }).catch(()=>{ st.textContent = 'Could not load the surface model.'; });
+  const modeBtn = document.getElementById('topo-mode');
+  modeBtn.addEventListener('click', ()=>{
+    const on = uni.uMode.value < .5; uni.uMode.value = on ? 1 : 0;
+    modeBtn.setAttribute('aria-pressed', on); modeBtn.textContent = on ? 'Height colours' : 'Plain surface';
+  });
+  document.getElementById('topo-top').addEventListener('click', ()=>{ if (!topView) return; camera.position.copy(topView.pos); controls.target.copy(topView.target); });
+  document.getElementById('topo-reset').addEventListener('click', ()=>{ if (!home) return; camera.position.copy(home.pos); controls.target.copy(home.target); document.getElementById('topo-cut').value = 100; uni.uCut.value = 2; });
+  document.getElementById('topo-cut').addEventListener('input', e=>{ const v = +e.target.value; uni.uCut.value = v >= 100 ? 2 : v/100; });
+  let visible = true; // only draw while the viewer is on screen
+  if ('IntersectionObserver' in window) new IntersectionObserver(e=>{ visible = e[0].isIntersecting; }).observe(host);
+  (function tick(){ if (visible){ if (controls) controls.update(); renderer.render(scene, camera); } requestAnimationFrame(tick); })();
+})();
+</script>
+<script>
+/* Shapes over the photo-real model: a second, lazily loaded splat viewer with a three.js layer that follows its camera */
+(function(){
+  const wrap = document.getElementById('blkwrap'), st = document.getElementById('blk-status');
+  const setStatus = t => { st.textContent = t; st.hidden = !t; };
+  if (!window.SplatViewer || !window.THREE){ setStatus('3D viewer could not start.'); return; }
+  const shapesCanvas = document.getElementById('blk-shapes');
+  const renderer = new THREE.WebGLRenderer({canvas: shapesCanvas, antialias: true, alpha: true, premultipliedAlpha: false});
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8478, 0.75));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.55); scene.add(sun);
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 200); camera.matrixAutoUpdate = false;
+  const group = new THREE.Group(); group.matrixAutoUpdate = false; scene.add(group);
+  const faceMats = [], edgeMat = new THREE.LineBasicMaterial({color: 0x15191d, transparent: true});
+  const colours = {floor: 0xCDC7BC, wall: 0xF2F1EC, block: 0xE2D4BA, table: 0xC4AA84, leg: 0x786E64};
+  let walls = [], frame = null, last = null, mix = 0.3;
+  const splatCanvas = document.getElementById('blk-splat');
+
+  function render(){
+    if (!last) return;
+    const [v, f, W, H] = last;
+    const dpr = W / Math.max(1, shapesCanvas.clientWidth);
+    renderer.setPixelRatio(dpr); renderer.setSize(shapesCanvas.clientWidth, shapesCanvas.clientHeight, false);
+    camera.fov = 2 * Math.atan(H / (2 * f)) * 180 / Math.PI; camera.aspect = W / H; camera.updateProjectionMatrix();
+    // splat view is OpenCV style (x right, y down, z forward); three.js looks down -z with y up
+    const m = new THREE.Matrix4().fromArray(v);
+    camera.matrixWorldInverse.copy(new THREE.Matrix4().makeScale(1, -1, -1).multiply(m));
+    camera.matrixWorld.copy(camera.matrixWorldInverse).invert();
+    const cp = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
+    sun.position.copy(cp).add(new THREE.Vector3(...(frame ? frame.n : [0, 0, 1])).multiplyScalar(2));
+    if (frame){ // hide walls that stand between the camera and the room
+      const rx = cp.dot(frame.ax), rz = cp.dot(frame.az), [x0, x1, z0, z1] = frame.room;
+      walls.forEach(w => { w.visible = !((w.userData.side === 'x0' && rx < x0) || (w.userData.side === 'x1' && rx > x1) || (w.userData.side === 'z0' && rz < z0) || (w.userData.side === 'z1' && rz > z1)); });
+    }
+    const photo = mix < 0.6 ? 1 : 1 - (mix - 0.6) / 0.4;
+    splatCanvas.style.opacity = photo;
+    renderer.setClearColor(0xE6E9EC, 1 - photo);
+    faceMats.forEach(mt => { mt.opacity = Math.min(1, mix * 1.15); mt.transparent = mt.opacity < 1; mt.depthWrite = mt.opacity > 0.6; mt.visible = mix > 0.01; });
+    edgeMat.opacity = mix > 0.01 ? 0.9 : 0; edgeMat.visible = mix > 0.01;
+    renderer.render(scene, camera);
+  }
+
+  function build(b){
+    frame = b;
+    const ax = new THREE.Vector3(...b.ax), n = new THREE.Vector3(...b.n), az = new THREE.Vector3(...b.az);
+    const M = new THREE.Matrix4().makeBasis(ax, n, az); M.setPosition(n.clone().multiplyScalar(-b.d));
+    group.matrix.copy(M); group.updateMatrixWorld(true);
+    for (const k of Object.keys(colours)){ const mt = new THREE.MeshLambertMaterial({color: colours[k], transparent: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1}); mt.userData.kind = k; faceMats.push(mt); }
+    const matFor = k => faceMats.find(mt => mt.userData.kind === k);
+    b.boxes.forEach(x => {
+      const g = new THREE.BoxGeometry(x.x1 - x.x0, x.y1 - x.y0, x.z1 - x.z0);
+      const mesh = new THREE.Mesh(g, matFor(x.kind));
+      mesh.position.set((x.x0 + x.x1) / 2, (x.y0 + x.y1) / 2, (x.z0 + x.z1) / 2);
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), edgeMat));
+      if (x.kind === 'wall'){ mesh.userData.side = x.side; walls.push(mesh); }
+      group.add(mesh);
+    });
+    document.querySelectorAll('[data-b]').forEach(el => { const v = {boxes: b.boxes.length, objects: new Set(b.boxes.filter(x => x.obj).map(x => x.obj)).size}[el.dataset.b]; if (v !== undefined) el.textContent = v; });
+    render();
+  }
+
+  function setMix(t){
+    mix = t; document.getElementById('blk-mix').value = Math.round(t * 100);
+    document.querySelectorAll('[data-blk]').forEach(bt => bt.setAttribute('aria-pressed', Math.abs(+bt.dataset.blk - t) < 0.01));
+    render();
+  }
+  document.querySelectorAll('[data-blk]').forEach(bt => bt.addEventListener('click', () => setMix(+bt.dataset.blk)));
+  document.getElementById('blk-mix').addEventListener('input', e => setMix(e.target.value / 100));
+  new ResizeObserver(() => render()).observe(wrap);
+
+  let started = false;
+  function start(){
+    if (started) return; started = true;
+    fetch('blocks.json').then(r => r.json()).then(build).catch(() => setStatus('Could not load the shapes.'));
+    fetch('splat_view.json').then(r => r.json()).then(v => {
+      // one of the two random halves of the splat is plenty for checking the fit
+      const sv = SplatViewer(splatCanvas, { parts: ['room_part0.b64.txt'], view: v, onStatus: setStatus, onDraw: (view, f, W, H) => { last = [view, f, W, H]; render(); } });
+      if (!sv) return;
+      let k = 0;
+      document.getElementById('blk-prev').addEventListener('click', () => { k = (k - 1 + sv.cameras()) % sv.cameras(); sv.photo(k); });
+      document.getElementById('blk-next').addEventListener('click', () => { k = (k + 1) % sv.cameras(); sv.photo(k); });
+    });
+  }
+  if ('IntersectionObserver' in window) new IntersectionObserver(e => { if (e[0].isIntersecting) start(); }, {rootMargin: '400px'}).observe(wrap);
+  else start();
+})();
+</script>
+<script>
+/* run summary and file list (written by the pipeline) */
+(function(){
+  const fmt = n => typeof n === 'number' ? n.toLocaleString('en-US') : n;
+  fetch('report.json').then(r => r.json()).then(r => {
+    document.getElementById('title').textContent = r.name || 'Room scan';
+    const s = r.stats || {};
+    document.getElementById('summary').textContent = [
+      s.frames_used && `${fmt(s.frames_used)} video frames`,
+      s.cameras_solved && `${fmt(s.cameras_solved)} camera positions solved`,
+      s.splats && `${fmt(s.splats)} Gaussians`,
+      s.psnr && `${s.psnr} dB on unseen frames`,
+      r.gpu && `${r.gpu.gpu}, ${r.gpu.minutes} min, about $${r.gpu.est_cost_usd}`,
+      r.total_minutes && `${r.total_minutes} min in total`].filter(Boolean).join(' · ');
+    const box = document.getElementById('files');
+    (r.files || []).forEach(g => {
+      const h = document.createElement('h3'); h.textContent = g.group; box.appendChild(h);
+      const ul = document.createElement('ul');
+      g.items.forEach(it => { const li = document.createElement('li'); const a = document.createElement('a'); a.href = '../' + it.path; a.textContent = it.path; a.download = ''; li.appendChild(a); li.append(` · ${it.mb} MB · ${it.what}`); ul.appendChild(li); });
+      box.appendChild(ul);
+    });
+  }).catch(() => { document.getElementById('summary').textContent = ''; });
+})();
+</script>

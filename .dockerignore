@@ -1,0 +1,13 @@
+.git
+.env
+*.env
+work/
+runs/
+data/
+archive/
+*/output/
+viewer/*.b64.txt
+viewer/*.jpg
+viewer/scene.json
+__pycache__/
+*.pyc

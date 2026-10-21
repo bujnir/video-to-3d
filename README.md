@@ -10,16 +10,42 @@ video ──► 1 frames ──► 2 camera poses ──► 3 Gaussian splat ─
           (CPU)        (CPU, COLMAP)      (GPU, RunPod)        (CPU)                 (CPU)
 ```
 
+## Quick start: the app (Docker)
+
+Pick a video, paste a RunPod key, get everything back.
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and start it.
+2. Double-click `start.bat` (Windows) or run `./start.sh` (macOS/Linux). The first start builds the image (about 5 minutes, 3 GB); later starts take seconds.
+3. Your browser opens http://localhost:8080. Choose the video, paste your RunPod API key, press **Start**.
+4. Watch the steps tick off (typically 15–30 minutes). When it's done: **Open the 3D viewer** or **Download all files (.zip)**.
+
+The key is used for that run only: it is passed to the pipeline in memory and sent only to RunPod's API, never saved or logged. To avoid typing it every time, put `RUNPOD_API_KEY=...` in a `.env` file next to `docker-compose.yml` (git ignores it). The GPU pod is always shut down at the end, also when you press **Cancel** or stop the app. Results stay in `runs/` next to this file. Stop the app with `docker compose down`.
+
+What you get (in `runs/<run>/output/` and in the zip):
+
+| Folder | Files |
+| --- | --- |
+| `viewer/` | `index.html`: photo-real model, smooth surface and shapes-over-photo, all interactive |
+| `splat/` | `room.splat`, `room.ply` (standard 3D Gaussian Splatting), `flythrough.mp4`, quality renders |
+| `surface/` | `surface_topography.glb` (height colours), `surface.obj`, `surface_full.ply` |
+| `shapes/` | `shapes.dae` (SketchUp), `shapes.glb`, `shapes.obj`, `shapes_plan.png`, `shapes.json` |
+| `cameras/` | `colmap/` (COLMAP model), `points.ply` (sparse point cloud), `cameras.json` |
+| top level | `report.json` (stats, timings, GPU cost), `README.txt`, `logs/` |
+
+Without Docker, the same in one command: `pip install -r requirements.txt flask`, then
+`RUNPOD_API_KEY=... python app/pipeline.py my_room.mp4 --out runs/my_room` (or `python app/server.py` for the web app).
+
 ## Folder layout
 
 | Folder | Code | Output |
 | --- | --- | --- |
 | `1_frames/` | `video_to_frames.py` (video → sharp frames), `download_data.py` (test photos instead), `viz_features.py` (step pictures for the page) | frames go to `work/img` |
 | `2_camera_poses/` | `sfm.py` (COLMAP: where each photo was taken + sparse 3D points), `export.py` (point cloud for the page) | `output/sparse_model/` (COLMAP model), `output/log.json` |
-| `3_gaussian_splat/` | `run_pod.py` (one command: rent GPU, train, download, delete pod), `pod_server.py`, `job3.sh`, `ckpt_to_web.py`, `ckpt_to_splat.py`, `gs_normalize.py` | `output/` (held-out comparison renders, quality stats, fly-through video, settings) |
+| `3_gaussian_splat/` | `pack_for_gpu.py` (photos + COLMAP model → upload package, viewer cameras), `run_pod.py` (rent GPU, train, download, delete pod), `pod_server.py`, `train_job.sh`, `ckpt_to_web.py`, `ckpt_to_splat.py`, `splat_to_ply.py`, `gs_normalize.py` | `output/` (held-out comparison renders, quality stats, fly-through video, settings) |
 | `4_surface/` | `splat_to_mesh.py` (depth fusion → smooth mesh), `mesh_to_web.py`, `export_desktop.py` | `output/room_surface_topography.glb` (height colours), `room_surface.obj`, `room_surface_full.ply`, previews |
 | `5_shapes/` | `blockout.py` (floor plane + walls + furniture boxes) | `output/room_blocks.dae` (SketchUp), `.glb`, `.obj`, `blocks.json`, plan image |
-| `viewer/` | `index.html` (the demo page), `splat_viewer.js`, `screenshot_viewer.js` | all data files the page loads |
+| `viewer/` | `index.html` (the demo page for the test room), `splat_viewer.js`, `screenshot_viewer.js` | all data files the page loads |
+| `app/` | `pipeline.py` (all steps in one command), `server.py` (the web app), `viewer_template.html` (results page) | |
 | `archive/` | earlier README and a downloaded copy of an older page version (local only, not in git) | |
 
 `work/` and `runs/` (created when you run the steps) hold frames and intermediate files; git ignores them, as well as the API key file `.env`.
@@ -35,7 +61,9 @@ video ──► 1 frames ──► 2 camera poses ──► 3 Gaussian splat ─
 
 All models are in relative units: photos alone have no scale. Add one known distance, IMU data, or a depth/LiDAR sensor to get real measurements.
 
-## How to run it on your own video
+## Running the steps one by one
+
+`app/pipeline.py` runs exactly these commands; use them to rerun or tune a single step.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -44,27 +72,27 @@ pip install -r requirements.txt
 
 # 1 + 2: frames and camera poses (CPU)
 python 1_frames/video_to_frames.py my_room.mp4 work 2      # 2 frames per second
-python 2_camera_poses/sfm.py work
-python 1_frames/viz_features.py work                       # optional step pictures
-python 2_camera_poses/export.py work                       # point cloud for the page
+python 2_camera_poses/sfm.py work                          # add "sequential" for long videos
 
-# 3: Gaussian splat on a rented GPU: cp .env.example .env, put your RunPod key in .env (git ignores it)
-#    data.tgz = data/images/*.jpg + data/sparse/0/{cameras,images,points3D}.bin
+# 3: Gaussian splat on a rented GPU: cp .env.example .env and put your RunPod key in .env
+python 3_gaussian_splat/pack_for_gpu.py work work/gpu_in   # upload package + viewer cameras
 set -a; . ./.env; set +a
-python 3_gaussian_splat/run_pod.py data.tgz runs/room1
+python 3_gaussian_splat/run_pod.py work/gpu_in/data.tgz work/gpu_out 15000
+mkdir -p work/gpu_out/res && tar -xzf work/gpu_out/results.tgz -C work/gpu_out/res
+gunzip -c work/gpu_out/res/room_full.splat.gz > work/gpu_out/res/room.splat
+python 3_gaussian_splat/splat_to_ply.py work/gpu_out/res/room.splat work/room.ply
 
 # 4: smooth surface (CPU)
 DS=2 RMAX=2 MINW=2 SMAX=0.08 EDGE=0.08 SMOOTH=40 \
-  python 4_surface/splat_to_mesh.py runs/room1/room_full.splat viewer/splat_view.json runs/mesh 0.011
-python 4_surface/mesh_to_web.py runs/mesh/mesh.ply viewer 220000 viewer/splat_view.json
+  python 4_surface/splat_to_mesh.py work/gpu_out/res/room.splat work/gpu_in/splat_view.json work/mesh 0.011
+mkdir -p work/web && python 4_surface/mesh_to_web.py work/mesh/mesh.ply work/web 220000 work/gpu_in/splat_view.json
 
 # 5: shapes (CPU), then desktop copies of the surface in the same coordinates
-python 5_shapes/blockout.py viewer/room_mesh.b64.txt viewer/splat_view.json 5_shapes/output
-python 4_surface/export_desktop.py viewer viewer/splat_view.json 5_shapes/output/room_frame.json
-
-# look at it
-cd viewer && python -m http.server 8000                    # open http://localhost:8000
+python 5_shapes/blockout.py work/web/room_mesh.b64.txt work/gpu_in/splat_view.json work/shapes
+python 4_surface/export_desktop.py work/web work/gpu_in/splat_view.json work/shapes/room_frame.json
 ```
+
+The demo page for the test room is in `viewer/` (`cd viewer && python -m http.server 8000`, then open http://localhost:8000). `1_frames/viz_features.py` and `2_camera_poses/export.py` make the extra pictures and point cloud used only by that demo page.
 
 ### Capture tips (from the test)
 - Move slowly; motion blur is the main cause of failed matches.

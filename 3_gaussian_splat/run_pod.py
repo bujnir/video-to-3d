@@ -1,29 +1,41 @@
 """Train a Gaussian splat on a rented RunPod GPU, then delete the pod.
 
-Usage:  python run_pod.py data.tgz out_dir
-  data.tgz  = data/images/*.jpg + data/sparse/0/{cameras,images,points3D}.bin (COLMAP binary)
-  needs RUNPOD_API_KEY in the environment (e.g. from the folder's .env file); never commit it.
+Usage:  python run_pod.py data.tgz out_dir [steps]
+  data.tgz  from pack_for_gpu.py (photos + COLMAP model)
+  steps     training steps, default 15000 (7000 = quicker preview)
+Needs RUNPOD_API_KEY in the environment. The key is only sent to RunPod's API and never printed.
 
 What it does:
-  1. creates a SECURE-cloud RTX 4090 pod (community pods had broken CUDA drivers)
-     running pod_server.py, a tiny token-protected HTTP job server on port 8888
-  2. uploads data.tgz, ckpt_to_web.py, ckpt_to_splat.py and job3.sh, runs the job
-  3. polls the log, downloads results.tgz, deletes the pod (always, even on error)
-Cost on the demo room: about 7.5 min of GPU time, roughly $0.45.
+  1. rents a SECURE-cloud GPU pod (RTX 4090 first, then other 24 GB+ cards if none are free;
+     community-cloud pods had broken CUDA drivers in our tests)
+  2. starts pod_server.py on it (a tiny token-protected job server) and uploads the data,
+     ckpt_to_web.py, ckpt_to_splat.py and train_job.sh
+  3. runs the job, prints progress, downloads results.tgz (includes room_full.splat.gz)
+  4. always deletes the pod at the end, also after errors or Ctrl+C
+Writes out_dir/results.tgz and out_dir/gpu_run.json (GPU, minutes, estimated cost).
 """
-import base64, json, os, secrets, sys, time, urllib.request
+import base64, json, os, secrets, signal, sys, time, urllib.error, urllib.request
+
+signal.signal(signal.SIGTERM, lambda *a: sys.exit(143))  # cancel -> still delete the pod (finally block)
 
 API = 'https://rest.runpod.io/v1'
-KEY = os.environ['RUNPOD_API_KEY']
 HERE = os.path.dirname(os.path.abspath(__file__))
+GPUS = ['NVIDIA GeForce RTX 4090', 'NVIDIA RTX A6000', 'NVIDIA L40S', 'NVIDIA GeForce RTX 3090', 'NVIDIA RTX A5000']
+IMAGE = 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
 
 
 def api(method, path, body=None):
     req = urllib.request.Request(API + path, method=method, data=json.dumps(body).encode() if body else None,
-                                 headers={'Authorization': 'Bearer ' + KEY, 'Content-Type': 'application/json'})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        t = r.read()
-        return json.loads(t) if t else None
+                                 headers={'Authorization': 'Bearer ' + os.environ['RUNPOD_API_KEY'], 'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            t = r.read()
+            return json.loads(t) if t else None
+    except urllib.error.HTTPError as e:
+        msg = e.read().decode(errors='replace')[:300]
+        if e.code in (401, 403):
+            raise SystemExit('RunPod rejected the API key (check that it is correct and has read/write access).')
+        raise RuntimeError(f'RunPod API {method} {path}: HTTP {e.code} {msg}')
 
 
 def job(base, token, method, path, data=None, timeout=600):
@@ -32,41 +44,73 @@ def job(base, token, method, path, data=None, timeout=600):
         return r.read()
 
 
-def main(data_tgz, out_dir):
-    token = secrets.token_hex(24)
+def create_pod(token):
     srv = base64.b64encode(open(os.path.join(HERE, 'pod_server.py'), 'rb').read()).decode()
-    pod = api('POST', '/pods', {
-        'name': 'lexivo-splat', 'imageName': 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04',
-        'gpuTypeIds': ['NVIDIA GeForce RTX 4090'], 'gpuCount': 1, 'cloudType': 'SECURE',
-        'containerDiskInGb': 40, 'volumeInGb': 10, 'ports': ['8888/http'],
-        'env': {'JOB_TOKEN': token, 'SRV': srv},
-        'dockerStartCmd': ['bash', '-c', 'echo $SRV | base64 -d > /srv.py && python3 /srv.py']})
-    pid = pod['id']
+    last = None
+    for gpu in GPUS:  # one at a time, so we know which card we got
+        try:
+            pod = api('POST', '/pods', {
+                'name': 'video-to-3d-splat', 'imageName': IMAGE, 'gpuTypeIds': [gpu], 'gpuCount': 1,
+                'cloudType': 'SECURE', 'containerDiskInGb': 40, 'volumeInGb': 10, 'ports': ['8888/http'],
+                'env': {'JOB_TOKEN': token, 'SRV': srv},
+                'dockerStartCmd': ['bash', '-c', 'echo $SRV | base64 -d > /srv.py && python3 /srv.py']})
+            return pod, gpu
+        except RuntimeError as e:
+            last = e; print(f'no {gpu} available, trying the next card', flush=True)
+    raise RuntimeError(f'no GPU pod could be created: {last}')
+
+
+def main(data_tgz, out_dir, steps=15000):
+    if not os.environ.get('RUNPOD_API_KEY'):
+        raise SystemExit('RUNPOD_API_KEY is not set.')
+    os.makedirs(out_dir, exist_ok=True)
+    token = secrets.token_hex(24)
+    t0 = time.time()
+    pod, gpu = create_pod(token)
+    pid, rate = pod['id'], float(pod.get('costPerHr') or 0)
     base = f'https://{pid}-8888.proxy.runpod.net'
-    print('pod', pid)
+    print(f'pod {pid} on {gpu} (${rate:.2f}/h)', flush=True)
+    ok = False
     try:
-        for _ in range(120):  # wait for the job server
+        for i in range(150):  # wait up to ~12 min for the pod to boot and the job server to answer
             try:
                 if job(base, token, 'GET', '/health', timeout=10): break
             except Exception:
+                if i % 6 == 0: print('waiting for the GPU pod to start…', flush=True)
                 time.sleep(5)
-        for name, src in [('data.tgz', data_tgz), ('ckpt_to_web.py', 'ckpt_to_web.py'),
-                          ('ckpt_to_splat.py', 'ckpt_to_splat.py')]:
-            job(base, token, 'PUT', '/f/' + name, open(os.path.join(HERE, src) if src != data_tgz else src, 'rb').read())
-        job(base, token, 'POST', '/run', open(os.path.join(HERE, 'job3.sh'), 'rb').read())
+        else:
+            raise RuntimeError('the GPU pod did not start in time')
+        print('uploading data', flush=True)
+        job(base, token, 'PUT', '/f/data.tgz', open(data_tgz, 'rb').read(), timeout=1800)
+        for name in ('ckpt_to_web.py', 'ckpt_to_splat.py'):
+            job(base, token, 'PUT', '/f/' + name, open(os.path.join(HERE, name), 'rb').read())
+        script = f'export STEPS={int(steps)}\n'.encode() + open(os.path.join(HERE, 'train_job.sh'), 'rb').read()
+        job(base, token, 'POST', '/run', script)
+        last = ''
         while True:
-            time.sleep(20)
+            time.sleep(15)
             st = json.loads(job(base, token, 'GET', '/status'))
-            print(job(base, token, 'GET', '/log?n=3').decode(errors='replace').strip()[-300:])
+            tail = job(base, token, 'GET', '/log?n=4').decode(errors='replace').strip()
+            if tail and tail != last:
+                print(tail.splitlines()[-1][-200:], flush=True); last = tail
             if not st.get('running'):
                 break
-        os.makedirs(out_dir, exist_ok=True)
-        open(os.path.join(out_dir, 'results.tgz'), 'wb').write(job(base, token, 'GET', '/f/results.tgz', timeout=1800))
-        print('saved', os.path.join(out_dir, 'results.tgz'))
+        full = job(base, token, 'GET', '/log?n=60').decode(errors='replace')
+        if st.get('exit') != 0 or 'ALL_DONE' not in full:
+            raise RuntimeError('GPU job failed. Last log lines:\n' + full[-3000:])
+        print('downloading results', flush=True)
+        open(os.path.join(out_dir, 'results.tgz'), 'wb').write(job(base, token, 'GET', '/f/results.tgz', timeout=3600))
+        ok = True
     finally:
-        api('DELETE', f'/pods/{pid}')
-        print('pod deleted')
+        try:
+            api('DELETE', f'/pods/{pid}'); print('pod deleted', flush=True)
+        except Exception as e:
+            print(f'WARNING: could not delete pod {pid}; delete it in the RunPod console. ({e})', flush=True)
+        mins = (time.time() - t0) / 60
+        json.dump({'gpu': gpu, 'pod_id': pid, 'usd_per_hour': rate, 'minutes': round(mins, 1),
+                   'est_cost_usd': round(rate * mins / 60, 2), 'steps': int(steps), 'ok': ok},
+                  open(os.path.join(out_dir, 'gpu_run.json'), 'w'), indent=1)
 
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 15000)

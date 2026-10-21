@@ -47,7 +47,11 @@ RMAX = int(os.environ.get('RMAX', 1))
 from scipy.ndimage import maximum_filter, minimum_filter
 tsdf = np.ones(len(X), np.float32)
 wsum = np.zeros(len(X), np.float32)
-for ci, cam in enumerate(view['cams']):
+cams = view['cams']
+MAXV = int(os.environ.get('MAXVIEWS', 120))  # long videos: fuse an evenly spaced subset of views
+if len(cams) > MAXV:
+    cams = [cams[i] for i in np.linspace(0, len(cams) - 1, MAXV).round().astype(int)]
+for ci, cam in enumerate(cams):
     R, t = np.array(cam['R']).reshape(3, 3), np.array(cam['t'])
     pc = P @ R.T + t
     z = pc[:, 2]
@@ -87,8 +91,8 @@ for ci, cam in enumerate(view['cams']):
     w = wsum[idx]
     tsdf[idx] = (tsdf[idx] * w + sdf) / (w + 1)
     wsum[idx] = w + 1
-    if ci % 20 == 0: print(f'  view {ci}/{len(view["cams"])}  {time.time() - t0:.0f}s')
-print(f'fused {len(view["cams"])} depth maps in {time.time() - t0:.0f}s')
+    if ci % 20 == 0: print(f'  view {ci}/{len(cams)}  {time.time() - t0:.0f}s', flush=True)
+print(f'fused {len(cams)} depth maps in {time.time() - t0:.0f}s')
 from skimage.measure import marching_cubes
 vol = tsdf.reshape(dims)
 mask = (wsum >= int(os.environ.get('MINW', 3))).reshape(dims)
