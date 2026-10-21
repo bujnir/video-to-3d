@@ -1,0 +1,1 @@
+{"splats_total": 1023804, "splats_shown": 1020366, "psnr": 27.9, "ssim": 0.867, "lpips": 0.195, "train_min": 7, "cost": "$0.45", "mb": 17.3, "gpu": "RTX 4090"}

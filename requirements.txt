@@ -1,0 +1,10 @@
+# CPU steps 1, 2, 4 and 5 (Python 3.10+). The GPU step installs its own packages on the pod (see 3_gaussian_splat/job3.sh).
+pycolmap>=3.10
+numpy
+scipy
+pillow
+matplotlib
+open3d>=0.18
+trimesh>=4.0
+scikit-image
+pycollada

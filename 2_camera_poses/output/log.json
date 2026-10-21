@@ -1,0 +1,9 @@
+{
+ "extract_s": 44.0,
+ "match_s": 300.9,
+ "map_s": 29.8,
+ "summary": "Reconstruction:\n\tnum_rigs = 1\n\tnum_cameras = 1\n\tnum_frames = 104\n\tnum_reg_frames = 104\n\tnum_images = 104\n\tnum_points3D = 17524\n\tnum_observations = 113100\n\tmean_track_length = 6.45401\n\tmean_observations_per_image = 1087.5\n\tmean_reprojection_error = 0.518387",
+ "num_models": 1,
+ "reg_images": 104,
+ "points3D": 17524
+}
