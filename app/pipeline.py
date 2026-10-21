@@ -27,6 +27,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('input'); ap.add_argument('--out', required=True); ap.add_argument('--name')
 ap.add_argument('--fps', type=float, default=2.0); ap.add_argument('--steps', type=int, default=15000)
 ap.add_argument('--width', type=int, default=1000); ap.add_argument('--keep-work', action='store_true')
+ap.add_argument('--resume', action='store_true', help='skip steps that already finished in this output folder')
 args = ap.parse_args()
 
 src = Path(args.input).resolve()
@@ -61,8 +62,12 @@ def run(cmd, env_extra=None, keep_key=False):
 
 
 def step(i, fn):
-    status(i, STEPS[i]); log(f'[{i + 1}/{len(STEPS)}] {STEPS[i]}')
+    status(i, STEPS[i]); done = work / f'.done_{i}'
+    if args.resume and done.exists() and i < len(STEPS) - 1:
+        log(f'[{i + 1}/{len(STEPS)}] {STEPS[i]}: already done, skipped'); timings[STEPS[i]] = json.loads(done.read_text()); return
+    log(f'[{i + 1}/{len(STEPS)}] {STEPS[i]}')
     t = time.time(); fn(); timings[STEPS[i]] = round((time.time() - t) / 60, 1)
+    done.write_text(json.dumps(timings[STEPS[i]]))
 
 
 def mb(p): return round(Path(p).stat().st_size / 1e6, 1)
@@ -98,7 +103,7 @@ def frames():
 
 def poses():
     n = len(list((work / 'img').glob('*.jpg')))
-    run([PY, '2_camera_poses/sfm.py', work, 'exhaustive' if n <= 150 else 'sequential'])
+    run([PY, '2_camera_poses/sfm.py', work, 'exhaustive' if n <= 150 else 'sequential'], env_extra={'GLOG_minloglevel': '1'})  # COLMAP: warnings only
     lg = json.load(open(work / 'sfm' / 'log.json'))
     log(f"    {lg['reg_images']} of {n} frames placed, {lg['points3D']:,} 3D points")
     if lg['reg_images'] < max(10, 0.4 * n):

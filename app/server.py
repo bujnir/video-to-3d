@@ -18,7 +18,7 @@ procs = {}
 PAGE = '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Video to 3D</title><style>
 :root{--bg:#F5F6F7;--ink:#1B2329;--muted:#5D6B76;--rule:#D9DEE2;--acc:#E8642C;--card:#fff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
 .wrap{max-width:760px;margin:0 auto;padding:32px 16px 60px}h1{font-size:1.8rem;margin:0 0 4px}h2{font-size:1.15rem;margin:28px 0 10px}
 .sub{color:var(--muted);margin:0 0 24px}.card{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:20px}
 label{display:block;font-weight:600;margin:14px 0 6px}label:first-child{margin-top:0}.hint{font-weight:400;color:var(--muted);font-size:.88rem}
@@ -83,10 +83,27 @@ def start():
     json.dump({'name': name, 'file': f.filename, 'created': time.strftime('%Y-%m-%d %H:%M'), 'steps': steps, 'fps': fps}, open(d / 'meta.json', 'w'))
     env = dict(os.environ, RUNPOD_API_KEY=key, PYTHONUNBUFFERED='1')
     log = open(d / 'run.log', 'w')
-    procs[rid] = subprocess.Popen([sys.executable, str(ROOT / 'app' / 'pipeline.py'), str(vid), '--out', str(d / 'output'),
-                                   '--name', name, '--steps', steps, '--fps', fps], cwd=ROOT, env=env, stdout=log,
-                                  stderr=subprocess.STDOUT, start_new_session=True)
+    launch(rid, env, log)
     return redirect(f'/run/{rid}')
+
+
+def launch(rid, env, log, resume=False):
+    d = DATA / rid; meta = json.load(open(d / 'meta.json'))
+    vid = next((d / 'input').glob('input.*'))
+    cmd = [sys.executable, str(ROOT / 'app' / 'pipeline.py'), str(vid), '--out', str(d / 'output'),
+           '--name', meta['name'], '--steps', meta['steps'], '--fps', meta['fps']] + (['--resume'] if resume else [])
+    procs[rid] = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+
+
+@app.post('/api/run/<rid>/retry')
+def retry(rid):
+    d = run_dir(rid); p = procs.get(rid)
+    if p and p.poll() is None: return jsonify({'ok': False, 'error': 'still running'}), 409
+    key = ((request.get_json(silent=True) or {}).get('key') or '').strip() or os.environ.get('RUNPOD_API_KEY', '')
+    if not key: return jsonify({'ok': False, 'error': 'RunPod API key is required'}), 400
+    log = open(d / 'run.log', 'a'); log.write('\n==== retry: continuing from the step that stopped ====\n'); log.flush()
+    launch(rid, dict(os.environ, RUNPOD_API_KEY=key, PYTHONUNBUFFERED='1'), log, resume=True)
+    return jsonify({'ok': True})
 
 
 @app.get('/run/<rid>')
@@ -98,6 +115,8 @@ def run_page(rid):
 <div id="done" hidden><a class="btn" href="/runs/{rid}/output/viewer/index.html" target="_blank">Open the 3D viewer</a>
 <a class="btn sec" id="zip" href="#">Download all files (.zip)</a>
 <p class="hint">Files are also in the output folder: runs/{rid}/output</p></div>
+<div id="retrybox" hidden><label class="hint" for="rkey" id="rkeyl">RunPod API key for the retry</label> <input type="password" id="rkey" autocomplete="off" style="max-width:340px">
+<button class="btn" id="retry" type="button">Retry from the failed step</button></div>
 <button class="btn sec" id="cancel" type="button">Cancel run</button></div>
 <h2>Log</h2><pre id="log"></pre>
 <script>
@@ -113,8 +132,16 @@ async function tick(){{
   if (s.state === 'error') document.getElementById('err').innerHTML = '<p class="err"></p>', document.querySelector('#err .err').textContent = 'Stopped: ' + (s.error || 'unknown error');
   if (s.state === 'done') {{ document.getElementById('done').hidden = false; document.getElementById('zip').href = r.zip; }}
   document.getElementById('cancel').hidden = !r.alive;
+  document.getElementById('retrybox').hidden = !(s.state === 'error' && !r.alive);
+  if (r.has_env_key) {{ document.getElementById('rkey').hidden = true; document.getElementById('rkeyl').hidden = true; }}
+  if (s.state !== 'error') document.getElementById('err').innerHTML = '';
   if (r.alive || !s.state || s.state === 'running') setTimeout(tick, 3000);
 }}
+document.getElementById('retry').onclick = async () => {{
+  const res = await fetch('/api/run/' + rid + '/retry', {{method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify({{key: document.getElementById('rkey').value}})}}).then(r => r.json());
+  if (!res.ok) return alert(res.error || 'Could not retry');
+  document.getElementById('retrybox').hidden = true; setTimeout(tick, 1500);
+}};
 document.getElementById('cancel').onclick = async () => {{ if (confirm('Cancel this run? The GPU pod will be shut down.')) await fetch('/api/run/' + rid + '/cancel', {{method: 'POST'}}); }};
 tick();
 </script>''')
@@ -129,7 +156,8 @@ def run_api(rid):
         status = dict(status, state='error', error=status.get('error') or 'The pipeline process ended unexpectedly; see the log.')
     logtxt = (d / 'run.log').read_text(errors='replace')[-12000:] if (d / 'run.log').exists() else ''
     zips = list((d / 'output').glob('*.zip')); meta = json.load(open(d / 'meta.json'))
-    return jsonify({'status': status, 'alive': alive, 'log': logtxt, 'zip': f'/runs/{rid}/output/{zips[0].name}' if zips else None, 'name': meta['name']})
+    return jsonify({'status': status, 'alive': alive, 'log': logtxt, 'zip': f'/runs/{rid}/output/{zips[0].name}' if zips else None, 'name': meta['name'],
+                    'has_env_key': bool(os.environ.get('RUNPOD_API_KEY'))})
 
 
 @app.post('/api/run/<rid>/cancel')

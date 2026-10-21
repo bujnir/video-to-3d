@@ -766,7 +766,7 @@ onmessage = (e) => {
     (r.files || []).forEach(g => {
       const h = document.createElement('h3'); h.textContent = g.group; box.appendChild(h);
       const ul = document.createElement('ul');
-      g.items.forEach(it => { const li = document.createElement('li'); const a = document.createElement('a'); a.href = '../' + it.path; a.textContent = it.path; a.download = ''; li.appendChild(a); li.append(` · ${it.mb} MB · ${it.what}`); ul.appendChild(li); });
+      g.items.forEach(it => { const li = document.createElement('li'); const a = document.createElement('a'); a.href = '../' + it.path; a.textContent = it.path; a.download = ''; li.appendChild(a); li.append(` · ${it.mb < 0.1 ? 'under 0.1' : it.mb} MB · ${it.what}`); ul.appendChild(li); });
       box.appendChild(ul);
     });
   }).catch(() => { document.getElementById('summary').textContent = ''; });

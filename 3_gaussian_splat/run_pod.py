@@ -20,28 +20,35 @@ signal.signal(signal.SIGTERM, lambda *a: sys.exit(143))  # cancel -> still delet
 
 API = 'https://rest.runpod.io/v1'
 HERE = os.path.dirname(os.path.abspath(__file__))
+UA = 'video-to-3d/1.0 (+https://github.com/bujnir/video-to-3d)'  # RunPod's firewall blocks Python's default user agent
 GPUS = ['NVIDIA GeForce RTX 4090', 'NVIDIA RTX A6000', 'NVIDIA L40S', 'NVIDIA GeForce RTX 3090', 'NVIDIA RTX A5000']
 IMAGE = 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
 
 
 def api(method, path, body=None):
     req = urllib.request.Request(API + path, method=method, data=json.dumps(body).encode() if body else None,
-                                 headers={'Authorization': 'Bearer ' + os.environ['RUNPOD_API_KEY'], 'Content-Type': 'application/json'})
+                                 headers={'Authorization': 'Bearer ' + os.environ['RUNPOD_API_KEY'], 'Content-Type': 'application/json', 'User-Agent': UA})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             t = r.read()
             return json.loads(t) if t else None
     except urllib.error.HTTPError as e:
         msg = e.read().decode(errors='replace')[:300]
-        if e.code in (401, 403):
+        if e.code == 401 or (e.code == 403 and 'error code' not in msg):
             raise SystemExit('RunPod rejected the API key (check that it is correct and has read/write access).')
         raise RuntimeError(f'RunPod API {method} {path}: HTTP {e.code} {msg}')
 
 
-def job(base, token, method, path, data=None, timeout=600):
-    req = urllib.request.Request(base + path, method=method, data=data, headers={'X-Token': token})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+def job(base, token, method, path, data=None, timeout=600, tries=4):
+    for k in range(tries):  # the proxy in front of the pod gives short 404/502s while it settles
+        req = urllib.request.Request(base + path, method=method, data=data, headers={'X-Token': token, 'User-Agent': UA})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
+            code = getattr(e, 'code', None)
+            if k == tries - 1 or code in (400, 403, 409): raise
+            time.sleep(10)
 
 
 def create_pod(token):
@@ -72,12 +79,13 @@ def main(data_tgz, out_dir, steps=15000):
     print(f'pod {pid} on {gpu} (${rate:.2f}/h)', flush=True)
     ok = False
     try:
-        for i in range(150):  # wait up to ~12 min for the pod to boot and the job server to answer
-            try:
-                if job(base, token, 'GET', '/health', timeout=10): break
+        for i in range(150):  # wait up to ~12 min for the pod to boot and *our* job server to answer
+            try:  # RunPod's proxy can answer before the pod is up, so check for the server's own reply
+                if json.loads(job(base, token, 'GET', '/health', timeout=10, tries=1)).get('ok') is True: break
             except Exception:
-                if i % 6 == 0: print('waiting for the GPU pod to start…', flush=True)
-                time.sleep(5)
+                pass
+            if i % 6 == 0: print('waiting for the GPU pod to start…', flush=True)
+            time.sleep(5)
         else:
             raise RuntimeError('the GPU pod did not start in time')
         print('uploading data', flush=True)

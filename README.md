@@ -12,12 +12,13 @@ video ──► 1 frames ──► 2 camera poses ──► 3 Gaussian splat ─
 
 ## Quick start: the app (Docker)
 
-Pick a video, paste a RunPod key, get everything back.
+Pick a video, paste a RunPod key, get everything back. Tested end to end with a 26-second room video: 13 minutes on top of the camera step, about $0.15 of GPU time at Preview quality.
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and start it.
 2. Double-click `start.bat` (Windows) or run `./start.sh` (macOS/Linux). The first start builds the image (about 5 minutes, 3 GB); later starts take seconds.
 3. Your browser opens http://localhost:8080. Choose the video, paste your RunPod API key, press **Start**.
 4. Watch the steps tick off (typically 15–30 minutes). When it's done: **Open the 3D viewer** or **Download all files (.zip)**.
+   If a run stops (no GPU free, network hiccup), press **Retry from the failed step**: finished steps are kept, so only the rest runs again.
 
 The key is used for that run only: it is passed to the pipeline in memory and sent only to RunPod's API, never saved or logged. To avoid typing it every time, put `RUNPOD_API_KEY=...` in a `.env` file next to `docker-compose.yml` (git ignores it). The GPU pod is always shut down at the end, also when you press **Cancel** or stop the app. Results stay in `runs/` next to this file. Stop the app with `docker compose down`.
 
