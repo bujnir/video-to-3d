@@ -12,7 +12,7 @@ video ──► 1 frames ──► 2 camera poses ──► 3 Gaussian splat ─
 
 ## Quick start: the app (Docker)
 
-Pick a video, paste a RunPod key, get everything back. Tested end to end with a 26-second room video: 13 minutes on top of the camera step, about $0.15 of GPU time at Preview quality.
+Pick a video, paste a RunPod key, get everything back. Tested end to end with a 26-second room video: about 27 minutes on a 2-core machine (faster on a normal PC) and about $0.15 of GPU time at Preview quality.
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and start it.
 2. Double-click `start.bat` (Windows) or run `./start.sh` (macOS/Linux). The first start builds the image (about 5 minutes, 3 GB); later starts take seconds.
